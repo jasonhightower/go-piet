@@ -262,7 +262,7 @@ func (p *PietTokens) Size() int {
     return len(p.shapes)
 }
 func (p *PietTokens) At(x int, y int) *Shape {
-    if p.data == nil || p.data[x] == nil {
+    if p.data == nil || x < 0 || y < 0 || x >= len(p.data) || p.data[x] == nil || y >= len(p.data[x]) {
         return nil
     }
     if p.data[x][y] == -1 {
@@ -376,102 +376,18 @@ type Shape struct {
     Color Col
     AdjList []Edge
     Size int32
-    // TODO JH need a better data structure than this
-    leftPoints []image.Point
-    rightPoints []image.Point
-    topPoints []image.Point
-    bottomPoints []image.Point
-}
-func (s Shape) String() string {
-    result := "{ right: ["
-    for i := 0; i < len(s.rightPoints); i++ {
-        if i > 0 {
-            result += ", "
-        }
-        result += fmt.Sprintf("%s", s.rightPoints[i])
-    }
-    result += "], bottom: ["
-    for i := 0; i < len(s.bottomPoints); i++ {
-        if i > 0 {
-            result += ", "
-        }
-        result += fmt.Sprintf("%s", s.bottomPoints[i])
-    }
-    result += fmt.Sprint("], left: [")
-    for i := 0; i < len(s.leftPoints); i++ {
-        if i > 0 {
-            result += ", "
-        }
-        result += fmt.Sprintf("%s", s.leftPoints[i])
-    }
-    result += fmt.Sprint("], top: [")
-    for i := 0; i < len(s.topPoints); i++ {
-        if i > 0 {
-            result += ", "
-        }
-        result += fmt.Sprintf("%s", s.topPoints[i])
-    }
-    result += fmt.Sprint("] }")
-    return result
+    xEdges *TreeNode
+    yEdges *TreeNode
 }
 func (s *Shape) AddPoint(p image.Point) {
     s.Size += 1
     if s.Size == 1 {
-        s.leftPoints = append(s.leftPoints, p)
-        s.rightPoints = append(s.rightPoints, p)
-        s.topPoints = append(s.topPoints, p)
-        s.bottomPoints = append(s.bottomPoints, p)
+        s.xEdges = NewTreeNode(p.X, p.Y)
+        s.yEdges = NewTreeNode(p.Y, p.X)
     } else {
-        if s.leftPoints[0].X == p.X {
-            s.leftPoints = append(s.leftPoints, p)
-        } else if s.leftPoints[0].X > p.X {
-            s.leftPoints = make([]image.Point, 1)
-            s.leftPoints[0] = p
-        }
-        if s.bottomPoints[0].Y == p.Y {
-            s.bottomPoints = append(s.bottomPoints, p)
-        } else if s.bottomPoints[0].Y < p.Y {
-            s.bottomPoints = make([]image.Point, 1)
-            s.bottomPoints[0] = p
-        }
-        if s.rightPoints[0].X == p.X {
-            s.rightPoints = append(s.rightPoints, p)
-        } else if s.rightPoints[0].X < p.X {
-            s.rightPoints = make([]image.Point, 1)
-            s.rightPoints[0] = p
-        }
-        if s.topPoints[0].Y == p.Y {
-            s.topPoints = append(s.topPoints, p)
-        } else if s.topPoints[0].Y > p.Y {
-            s.topPoints = make([]image.Point, 1)
-            s.topPoints[0] = p
-        }
+        s.xEdges.Add(p.X, p.Y)
+        s.yEdges.Add(p.Y, p.X)
     }
-}
-func (s *Shape) FindPoint(pos image.Point, dp Dp, cc Cc) image.Point {
-   switch dp {
-   case DpLeft:
-       if len(s.leftPoints) == 1 {
-           return s.leftPoints[0]
-       }
-       panic("Need to implement")
-   case DpRight:
-       if len(s.rightPoints) == 1 {
-           return s.rightPoints[0]
-       }
-       panic("Need to implement")
-   case DpDown:
-        if len(s.bottomPoints) == 1 {
-            return s.bottomPoints[0]
-        }
-        panic("Need to implement")
-   case DpUp:
-        if len(s.bottomPoints) == 1 {
-            return s.bottomPoints[0]
-        }
-        panic("Need to implement")
-   }
-   panic("Unknown direction")
 }
 func (s *Shape) AddEdge(e Edge) {
     s.AdjList = append(s.AdjList, e)
@@ -507,6 +423,10 @@ func Parse(tokens *PietTokens) *PietGraph {
     return pg
 }
 
+type Node struct {
+    x, y int
+}
+
 
 
 func FindEdges(idx int, tokens *PietTokens, pg *PietGraph) {
@@ -522,95 +442,138 @@ func FindEdges(idx int, tokens *PietTokens, pg *PietGraph) {
     }
 }
 
+func SlideToEdge(pt image.Point, shape *Shape, dp Dp, cc Cc, tokens *PietTokens, pg *PietGraph) {
+    var xAdj, yAdj int
+    switch dp {
+    case DpRight:
+        xAdj = 1
+    case DpDown:
+        yAdj = 1
+    case DpLeft:
+        xAdj = -1
+    case DpUp:
+        yAdj = -1
+    }
+    var target *Shape
+    x, y := pt.X, pt.Y
+    for true {
+        target = tokens.At(x + xAdj, y + yAdj)
+        if target == nil || target.Color != shape.Color {
+            break        
+        }
+        x += xAdj
+        y += yAdj
+    }
+    
+
+}
+
+func SlideThroughWhite(pt image.Point, shape *Shape, dp Dp, cc Cc, tokens *PietTokens, pg *PietGraph) (image.Point, int, bool) {
+    rotations := 0
+    for rotations < 4 {
+        switch dp {
+        case DpRight:
+            xNode, _ := shape.yEdges.Get(pt.Y)
+            pt.X = xNode.Max 
+            target := tokens.At(pt.X + 1, pt.Y)
+            if target != nil && target.Color != Black {
+                return image.Point{pt.X + 1, pt.Y}, rotations, true
+            } else {
+                dp = dp.Rotate(1)
+                cc = cc.Toggle()
+                rotations += 1
+            }
+        case DpDown:
+            yNode, _ := shape.xEdges.Get(pt.X)
+            pt.Y = yNode.Max
+            target := tokens.At(pt.X, pt.Y + 1)
+            if target != nil && target.Color != Black {
+                // create an edge based on the target
+                return image.Point{pt.X, pt.Y + 1}, rotations, true
+            } else {
+                dp = dp.Rotate(1)
+                cc = cc.Toggle()
+                rotations += 1
+            }
+        case DpLeft:
+            xNode, _ := shape.yEdges.Get(pt.Y)
+            pt.X = xNode.Min
+            target := tokens.At(pt.X - 1, pt.Y)
+            if target != nil && target.Color != Black {
+                // create an edge based on the target
+                return image.Point{pt.X - 1, pt.Y}, rotations, true
+            } else {
+                dp = dp.Rotate(1)
+                cc = cc.Toggle()
+                rotations += 1
+            }
+        case DpUp:
+            yNode, _ := shape.xEdges.Get(pt.X)
+            pt.Y = yNode.Min
+            target := tokens.At(pt.X, pt.Y - 1)
+            if target != nil && target.Color != Black {
+                return image.Point{pt.X, pt.Y - 1}, rotations, true
+            } else {
+                dp = dp.Rotate(1)
+                cc = cc.Toggle()
+                rotations += 1
+            }
+        }
+    }
+    // create an exit edge
+
+    // TODO JH should return an exit edge
+    panic("Should return an exit edge")
+}
+
 func FindEdge(idx int, dp Dp, cc Cc, tokens *PietTokens, pg *PietGraph) {
     shape := tokens.shapes[idx]
     if shape.Color == White {
         panic("White not supported")
     }
-    var edge image.Point
+
+    var treeEdge image.Point
     switch dp {
     case DpRight:
-        edge = shape.rightPoints[0]
-        if len(shape.rightPoints) > 1{
-            if cc == CcRight {
-                for i := 1; i < len(shape.rightPoints); i++ {
-                    if edge.Y < shape.rightPoints[i].Y {
-                        edge = shape.rightPoints[i]
-                    }
-                }
-            } else {
-                for i := 1; i < len(shape.rightPoints); i++ {
-                    if edge.Y > shape.rightPoints[i].Y {
-                        edge = shape.rightPoints[i]
-                    }
-                }
-            }
+        node := shape.xEdges.MaxNode()
+        if cc == CcLeft {
+            treeEdge = image.Point{X: node.Key, Y: node.Min}
+        } else {
+            treeEdge = image.Point{X: node.Key, Y: node.Max}
         }
     case DpDown:
-        edge = shape.bottomPoints[0]
-        if len(shape.bottomPoints) > 1 {
-            if cc == CcRight {
-                for i := 1; i < len(shape.bottomPoints); i++ {
-                    if edge.X > shape.bottomPoints[i].X {
-                        edge = shape.bottomPoints[i]
-                    }
-                }
-            } else {
-                for i := 1; i > len(shape.bottomPoints); i++ {
-                    if edge.X < shape.bottomPoints[i].X {
-                        edge = shape.bottomPoints[i]
-                    }
-                }
-            }
+        node := shape.yEdges.MaxNode()
+        if cc == CcLeft {
+            treeEdge = image.Point{X: node.Max, Y: node.Key}
+        } else {
+            treeEdge = image.Point{X: node.Min, Y: node.Key}
         }
     case DpLeft:
-        edge = shape.leftPoints[0]
-        if len(shape.leftPoints) > 1 {
-            if cc == CcRight {
-                for i := 1; i < len(shape.leftPoints); i++ {
-                    if edge.Y > shape.leftPoints[i].Y {
-                        edge = shape.leftPoints[i]
-                    }
-                }
-            } else {
-                for i := 1; i < len(shape.leftPoints); i++ {
-                    if edge.Y < shape.leftPoints[i].Y {
-                        edge = shape.leftPoints[i]
-                    }
-                }
-            }
+        node := shape.xEdges.MinNode()
+        if cc == CcLeft {
+            treeEdge = image.Point{X: node.Key, Y: node.Max}
+        } else {
+            treeEdge = image.Point{X: node.Key, Y: node.Min}
         }
     case DpUp:
-        edge = shape.topPoints[0]
-        if len(shape.topPoints) > 1 {
-            if cc == CcRight {
-                for i:= 1; i < len(shape.topPoints); i++ {
-                    if edge.X < shape.topPoints[i].X {
-                        edge = shape.topPoints[i]
-                    } 
-                }
-            } else {
-                for i:= 1; i < len(shape.topPoints); i++ {
-                    if edge.X > shape.topPoints[i].X {
-                        edge = shape.topPoints[i]
-                    } 
-                }
-            }
+        node := shape.yEdges.MinNode()
+        if cc == CcLeft {
+            treeEdge = image.Point{X: node.Min, Y: node.Key}
+        } else {
+            treeEdge = image.Point{X: node.Max, Y: node.Key}
         }
-    default:
-        panic("Unkown dp direction")
     }
 
     var adjEdge image.Point
     switch dp {
     case DpRight:
-        adjEdge = image.Point{X: edge.X + 1, Y: edge.Y}
+        adjEdge = image.Point{X: treeEdge.X + 1, Y: treeEdge.Y}
     case DpDown:
-        adjEdge = image.Point{X: edge.X, Y: edge.Y + 1}
+        adjEdge = image.Point{X: treeEdge.X, Y: treeEdge.Y + 1}
     case DpLeft:
-        adjEdge = image.Point{X: edge.X - 1, Y: edge.Y}
+        adjEdge = image.Point{X: treeEdge.X - 1, Y: treeEdge.Y}
     case DpUp:
-        adjEdge = image.Point{X: edge.X, Y: edge.Y - 1}
+        adjEdge = image.Point{X: treeEdge.X, Y: treeEdge.Y - 1}
     default:
         panic("Unknown direction")
     }
@@ -621,9 +584,25 @@ func FindEdge(idx int, dp Dp, cc Cc, tokens *PietTokens, pg *PietGraph) {
     targetShape := tokens.At(adjEdge.X, adjEdge.Y)
     if targetShape.Color == Black {
         return
-    } 
+    } else if targetShape.Color == White {
+        if whiteEdge, rotations, ok := SlideThroughWhite(adjEdge, targetShape, dp, cc, tokens, pg); ok {
+            fmt.Printf("%s - %d\n", adjEdge, rotations)
+            dp = dp.Rotate(3)
+            if rotations % 2 > 0 {
+                cc = cc.Toggle()
+            }
+            adjEdge = whiteEdge
+            fmt.Printf("Need to handle rotations in the edge")
+        } else {
+            panic("need to return exit edge")
+        }
+        targetShape = tokens.At(adjEdge.X, adjEdge.Y)
+    }
+ 
 
     index := tokens.data[adjEdge.X][adjEdge.Y]
+    // check if target is white
+    
     // create Edge
 
     newEdge := Edge{
@@ -632,6 +611,7 @@ func FindEdge(idx int, dp Dp, cc Cc, tokens *PietTokens, pg *PietGraph) {
         Dp: dp,
         Cc: cc,
         Target: index,
+        Entry: adjEdge,
     }
     pg.adjList[idx] = append(pg.adjList[idx], newEdge)
 }
@@ -642,34 +622,13 @@ type Edge struct {
     Dp Dp
     Cc Cc
     Target int
+    Entry image.Point
 }
 
 type Instr struct {
     Op Op
     Data uint32
 }
-type Block struct {
-    Label string
-    Instructions []Instr
-}
-func (b *Block) Add(instr Instr) {
-    b.Instructions = append(b.Instructions, instr)
-}
-
-type Executable struct {
-    blocks map[string]*Block
-}
-func NewExecutable() *Executable {
-    return &Executable{blocks: make(map[string]*Block)}
-}
-func (e *Executable) Get(label string) (*Block, bool) {
-    val, ok := e.blocks[label]
-    return val, ok
-}
-func (e *Executable) Add(block *Block) {
-    e.blocks[block.Label] = block
-}
-
 type Stack struct {
     data []int32
     head int
@@ -765,122 +724,6 @@ func (s *Stack) Dup() bool {
     s.head += 1
     s.data[s.head] = s.data[s.head -1]
     return true
-}
-
-/*
-type Parser struct {
-    cc Cc
-    dp Dp
-    pos image.Point
-    stack Stack
-    tokens *PietTokens
-}
-func NewParser(tokens *PietTokens, capacity int) *Parser {
-    return &Parser{
-        tokens: tokens,
-        stack: NewStack(capacity),
-    }
-}
-func (p *Parser) Parse() *Executable {
-    exec := NewExecutable()
-    p.parseBlock(exec)
-    return exec
-}
-
-func (p *Parser) parseBlock(exec *Executable) {
-    label := p.curLabel()
-    if _, contains := exec.Get(label); !contains {
-        block := Block{Label: label}
-        exec.Add(&block)
-        
-        // parse instructions
-        for true {
-            curShape := p.tokens[p.pos.X][p.pos.Y]
-            
-            if !p.moveToNextShape() {
-                var dpRot uint32 = 0
-                ccTog := 0
-                rotateCc := true
-                valid := false
-                // TODO JH this needs to be 7 once I have better test data
-                for i := 0; i < 3; i++ {
-                    // find next move in a loop here and create a block
-                    if rotateCc {
-                        fmt.Println("Rotate CC")
-                        ccTog += 1
-                        p.cc = p.cc.Toggle(1)
-                    } else {
-                        fmt.Println("Rotate DP")
-                        dpRot += 1
-                        p.dp = p.dp.Rotate(1)
-                    }
-                    rotateCc = !rotateCc
-                    if p.moveToNextShape() {
-                        valid = true
-                        break
-                    }
-                }
-                if !valid {
-                    block.Add(Instr{Op:Exit})
-                    return
-                }
-                if ccTog % 2 > 0 {
-                    block.Add(Instr{Op:Switch})
-                }
-                if dpRot > 0 {
-                    block.Add(Instr{Op:Pointer, Data: dpRot})
-                }
-            }
-            nextShape := p.tokens[p.pos.X][p.pos.Y]
-            op := curShape.Color.ToOp(nextShape.Color)
-            instr := Instr{Op: op}
-            if op == Push {
-                instr.Data = curShape.Size
-            }
-            block.Add(instr)
-        }
-    }
-}
-*/
-
-/*
-func (p *Parser) moveToNextShape() bool {
-    var adj = image.Point{}
-    switch p.dp {
-    case DpLeft:
-        adj.X = -1
-    case DpRight:
-        adj.X = 1
-    case DpUp:
-        adj.Y = -1
-    case DpDown:
-        adj.Y = 1
-    default:
-        panic("Unknown dp")
-    }
-    cur := p.pos
-    startShape := p.tokens[cur.X][cur.Y]
-    for p.tokens[cur.X][cur.Y] == startShape {
-        cur = cur.Add(adj)
-        if cur.X < 0 || cur.Y < 0 || cur.X >= len(p.tokens) || cur.Y >= len(p.tokens[cur.X]) {
-            return false
-        }
-        if p.tokens[cur.X][cur.Y].Color == Black {
-            fmt.Printf("%d, %d - is Black\n", cur.X, cur.Y)
-            return false
-        }
-    }
-    p.pos = cur
-    fmt.Printf("Move to %d, %d\n", p.pos.X, p.pos.Y)
-    return true
-}
-
-func (p *Parser) curLabel() string {
-    return Label(p.pos.X, p.pos.Y, p.dp, p.cc)
-}
-*/
-func Label(x int, y int, dp Dp, cc Cc) string {
-    return fmt.Sprintf("block_%d_%d__%d_%d", x, y, dp, cc)
 }
 
 func readImage(filename string) (image.Image, error) {
@@ -1079,8 +922,6 @@ func Prune(pg *PietGraph, sCapacity int) {
         }
     }
 
-    fmt.Printf("VISITED %d\n", len(visited))
-
     for i := 0; i < len(pg.adjList); i++ {
         prunedEdges := make([]Edge, 0)
         for j := 0; j < len(pg.adjList[i]); j++ {
@@ -1090,6 +931,153 @@ func Prune(pg *PietGraph, sCapacity int) {
         }
         pg.adjList[i] = prunedEdges
     }
+}
+
+func MoveWhite(x int, y int, tokens [][] *Shape, dp Dp, cc Cc, stack *Stack) (int, int) {
+    xAdj, yAdj := 0, 0
+    switch dp {
+    case DpRight:
+        xAdj = 1
+    case DpDown:
+        yAdj = 1
+    case DpLeft:
+        xAdj = -1
+    case DpUp:
+        xAdj = 1
+    }
+    curShape := tokens[x][y]
+    width, height := len(tokens), len(tokens[0])
+    for InBounds(x + xAdj, y + yAdj, width, height) {
+        x += xAdj
+        y += yAdj
+        if tokens[x][y] != curShape {
+            return x, y
+        }
+    }
+    return x, y
+}
+
+func Move(x int, y int, tokens [][]*Shape, dp Dp, cc Cc, stack *Stack) (int, int) {
+    xPos, yPos := x, y
+    curShape := tokens[x][y]
+    if curShape.Color == White {
+        return MoveWhite(x, y, tokens, dp, cc, stack)
+    }
+    switch dp {
+    case DpRight:
+        rightNode := curShape.xEdges.MaxNode()
+        xPos = rightNode.Key
+        if cc == CcLeft {
+            yPos = rightNode.Min
+        } else {
+            yPos = rightNode.Max
+        }
+        xPos += 1
+    case DpDown:
+        bottomNode := curShape.yEdges.MaxNode()
+        yPos = bottomNode.Key
+        if cc == CcLeft {
+            xPos = bottomNode.Max
+        } else {
+            xPos = bottomNode.Min
+        }
+        yPos += 1
+    case DpLeft:
+        leftNode := curShape.xEdges.MinNode()
+        xPos = leftNode.Key
+        if cc == CcLeft {
+            yPos = leftNode.Max
+        } else {
+            yPos = leftNode.Min
+        }
+        xPos -= 1
+    case DpUp:
+        topNode := curShape.yEdges.MinNode()
+        yPos = topNode.Key
+        if cc == CcLeft {
+            xPos = topNode.Min
+        } else {
+            xPos = topNode.Max
+        }
+        yPos -= 1
+    }
+    return xPos, yPos
+}
+func InBounds(x int, y int, width int, height int) bool {
+    return x >= 0 && y >= 0 && x < width && y < height
+}
+
+
+type TreeNode struct {
+    Key int
+    Min int
+    Max int
+    Left *TreeNode
+    Right *TreeNode
+}
+func NewTreeNode(key int, val int) *TreeNode {
+    return &TreeNode{Key: key, Min: val, Max: val}
+}
+func (t *TreeNode) Get(key int) (*TreeNode, bool) {
+    if t.Key == key {
+        return t, true
+    } else if t.Key < key {
+        if t.Right == nil {
+            return nil, false
+        }
+        return t.Right.Get(key)
+    } else {
+        if t.Left == nil {
+            return nil, false
+        }
+        return t.Left.Get(key)
+    }
+}
+func (t *TreeNode) MinNode() (*TreeNode) {
+    if t.Left != nil {
+        return t.Left.MinNode()
+    }
+    return t
+}
+func (t *TreeNode) MaxNode() (*TreeNode) {
+    if t.Right != nil {
+        return t.Right.MaxNode()
+    }
+    return t
+}
+func (t *TreeNode) Add(key int, val int) {
+    if t.Key == key {
+        if t.Min > val {
+            t.Min = val
+        }
+        if t.Max < val {
+            t.Max = val
+        }
+    } else if t.Key < key {
+        if t.Right == nil {
+            t.Right = NewTreeNode(key, val)
+        } else {
+            t.Right.Add(key, val)
+        }
+    } else {
+        if t.Left == nil {
+            t.Left = NewTreeNode(key, val)
+        } else {
+            t.Left.Add(key, val)
+        }
+    }
+}
+
+func ParseStmt(tokens [][]*Shape, capacity int) Stmt {
+    dp := DpRight
+    cc := CcLeft
+    x, y := 0, 0
+    curShape := tokens[x][y]
+
+    stack := NewStack(capacity)
+    x, y = Move(x, y, tokens, dp, cc, stack)
+    nextShape := tokens[x][y]
+
 }
 
 func main() {
@@ -1114,31 +1102,298 @@ func main() {
         }
     }
     tokens := Tokenize(img)
-    /*
-    for i := 0; i < tokens.Size(); i++ {
-        fmt.Printf("%d - %s\n", i, *tokens.shapes[i])
-    }
-    fmt.Println()
-    */
-    pg := Parse(tokens)
-    Prune(pg, *capacity)
-    /*
-    for i := 0; i < len(pg.adjList); i++ {
-        fmt.Printf("Edges (%d)\n", i)
-        for j := 0; j < len(pg.adjList[i]); j++ {
-            edge := pg.adjList[i][j]
-            fmt.Printf("  Edge %s %s\n", edge.Dp, edge.Cc)
-            fmt.Printf("    Target: %d\n", edge.Target)
-            if edge.Op == Push {
-                fmt.Printf("    Push %d\n", edge.Data)
-            } else {
-                fmt.Printf("    %s\n", edge.Op)
-            }
-        }
-    }
-    */
-    Interpret(pg, *capacity)
+    stmt := ParseStmt(tokens, *capacity)
+    
+    interpreter := NewInterpreter(*capacity)
+    interpreter.Interpret(stmt)
+
 
     // compile ... 
 }
+
+/*
+[Stmt]        | (Assign | Call | If)
+[Assign]      | Name Int
+[If]          | EqExpr Block Stmt?
+[EqExpr]      | Name Int
+[Block]       | Stmt+
+[Call]        | Name Int?
+[Int]         | (int32)
+*/
+
+type AstNode interface {
+}
+type Stmt interface {
+    AstNode
+}
+type Assign struct {
+    Name string
+    val int32    
+}
+type StmtBlock struct {
+    Children []Stmt
+}
+func (s *StmtBlock) Append(stmt Stmt) {
+    s.Children = append(s.Children, stmt)
+}
+type StmtIf struct {
+    Condition EqExpr
+    Block StmtBlock
+    Else Stmt
+}
+type EqExpr struct {
+    Name string
+    val int32
+}
+type Call struct {
+    Op Op
+    Args []int32
+}
+
+type Interpreter struct {
+    Dp Dp
+    Cc Cc
+    Stack *Stack
+}
+func NewInterpreter(capacity int) *Interpreter {
+    return &Interpreter{
+        Stack: NewStack(capacity),
+    }
+}
+func (interpreter *Interpreter) Interpret(stmt Stmt) {
+    if stmt == nil {
+        return
+    }
+    if assign, ok := stmt.(Assign); ok {
+//        fmt.Printf("Assign %s\n", assign.Name)
+        if assign.Name == "dp" {
+            interpreter.Dp = Dp(assign.val)
+        } else if assign.Name == "cc" {
+            interpreter.Cc = Cc(assign.val)
+        }
+    } else if block, ok := stmt.(StmtBlock); ok {
+//        fmt.Println("Block")
+        if block.Children != nil {
+            for _, s := range block.Children {
+                interpreter.Interpret(s)
+            }
+        }
+    } else if call, ok := stmt.(Call); ok {
+//        fmt.Printf(" Call %s\n", call.Op)
+        switch call.Op {
+            case Push:
+                interpreter.Stack.Push(call.Args[0])
+            case Pop:
+                interpreter.Stack.Pop()
+            case Add:
+                if f, s, ok := interpreter.Stack.Pop2(); ok {
+                    interpreter.Stack.Push(s + f)
+                }
+            case Sub:
+                if f, s, ok := interpreter.Stack.Pop2(); ok {
+                    interpreter.Stack.Push(s - f)
+                }
+            case Mult:
+                if f, s, ok := interpreter.Stack.Pop2(); ok {
+                    interpreter.Stack.Push(s * f)
+                }
+            case Div:
+                if f, s, ok := interpreter.Stack.Pop2(); ok {
+                    interpreter.Stack.Push(s / f)
+                }
+            case Dup:
+                if val, ok := interpreter.Stack.Peek(); ok {
+                    interpreter.Stack.Push(val)
+                }
+            case Switch:
+                if val, ok := interpreter.Stack.Pop(); ok {
+                    if val % 2 > 0 {
+                        interpreter.Cc = interpreter.Cc.Toggle()
+                    }
+                }
+            case Pointer:
+                if val, ok := interpreter.Stack.Pop(); ok {
+                    interpreter.Dp = interpreter.Dp.Rotate(val)
+                }
+            case CharOut:
+                if val, ok := interpreter.Stack.Pop(); ok {
+                    fmt.Print(string(val))
+                }
+            case Roll:
+                if f, s, ok := interpreter.Stack.Pop2(); ok {
+                    interpreter.Stack.Roll(s, f)
+                }
+            case Exit:
+                fmt.Println()
+                os.Exit(0)
+        }
+
+    }
+}
+/*
+func Evaluate(stmt Stmt, inspector func(s Stmt)) {
+    if stmt == nil {
+        return
+    }
+    if s, ok := stmt.(*StmtBlock); ok {
+        if s.Children != nil {
+            for _, c := range s.Children {
+                Evaluate(c, inspector)
+            }
+        }
+    } else if s, ok := stmt.(*StmtIf); ok {
+        // Need to evaluate the expression first
+        // if true
+        Evaluate(s.Block, inspector)
+        // else
+        Evaluate(s.Else, inspector)
+    } else if s, ok := stmt.(*Call); ok {
+        // Call Function
+    }
+
+}
+*/
+
+func HelloWorld() {
+    root := StmtBlock{}
+    root.Append(Assign{Name:"dp", val: 0})
+    root.Append(Assign{Name:"cc", val: 0})
+    root.Append(Call{Op: Switch})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: Mult})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Pointer})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Mult})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: CharOut})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Pointer})
+    root.Append(Call{Op: Mult})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: CharOut})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Pointer})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: Mult})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: CharOut})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Pointer})
+    root.Append(Call{Op: CharOut})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Pop})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Pointer})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: Roll})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Pointer})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: CharOut})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Pop})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Pointer})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Pop})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Pointer})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Mult})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Pointer})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Pointer})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: CharOut})
+    root.Append(Call{Op: CharOut})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Pointer})
+    root.Append(Call{Op: Mult})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: CharOut})
+    root.Append(Call{Op: CharOut})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Pointer})
+    root.Append(Call{Op: CharOut})
+    root.Append(Call{Op: CharOut})
+    root.Append(Call{Op: Dup})
+    root.Append(Call{Op: CharOut})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Pointer})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Pointer})
+    root.Append(Call{Op: Add})
+    root.Append(Call{Op: Push, Args: []int32 {1}})
+    root.Append(Call{Op: Pointer})
+    root.Append(Call{Op: Div})
+    root.Append(Call{Op: CharOut})
+    root.Append(Call{Op: CharOut})
+    root.Append(Call{Op: Exit})
+    
+    interpreter := NewInterpreter(512)
+    interpreter.Interpret(root)
+}
+
 

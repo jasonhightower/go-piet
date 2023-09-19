@@ -14,7 +14,7 @@ func TestParsing(t *testing.T) {
 
     tokens:= Tokenize(testImage)
 
-    pg := ParseTokens(tokens)
+    pg := Parse(tokens)
 
     _, ok := pg.GetEdge(0, DpRight, CcLeft)
     if !ok {
