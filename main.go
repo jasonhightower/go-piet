@@ -1,15 +1,19 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"image"
 	"image/color"
-	"io"
-	"os"
-    "flag"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"io"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
+    "bytes"
 )
 
 type CodelImage struct {
@@ -619,6 +623,7 @@ func ParseStmt(tokens *PietTokens, capacity int) Stmt {
 
 //        fmt.Printf("Move to (%d, %d) - %s %s : [%d]\n", carrot.X, carrot.Y, dp, cc, curShape.Size)
         op := curShape.Color.ToOp(nextShape.Color)
+//        fmt.Println(op)
         attempts = 8
         switch op {
         case Switch: 
@@ -656,9 +661,16 @@ func ParseStmt(tokens *PietTokens, capacity int) Stmt {
                 stack.Push(s / f)
             }
             root.Append(Call{Op: op})
+        case NumOut:
+            stack.Pop()
+            root.Append(Call{Op: op})
         case CharOut:
             stack.Pop()
             root.Append(Call{Op: op})
+        case NumIn:
+            panic("NumIn not supported")
+        case CharIn:
+            panic("NumIn not supported")
         case Roll:
             if f, s, ok := stack.Pop2(); ok {
                 stack.Roll(s, f)
@@ -790,11 +802,16 @@ func main() {
     filename := flag.String("f", "", "name of the piet file to interpret")
     codelsize := flag.Int("codel-size", 1, "Size of codels to support enlarged images for better viewing")
     capacity := flag.Int("capacity", 512, "Capacity of the stack")
+    mode := flag.String("m", "run", "(run | compile)")
     help := flag.Bool("h", false, "Print Help/Usage")
     flag.Parse()
 
-    if *help == true{
+    if *help == true {
         flag.Usage()
+        os.Exit(0)
+    }
+    if *mode != "run" && *mode != "compile" {
+        fmt.Printf("Unrecogznied mode %s, expected one of (run, compile)\n", *mode)
         os.Exit(0)
     }
 
@@ -810,8 +827,74 @@ func main() {
     tokens := Tokenize(img)
     stmt := ParseStmt(tokens, *capacity)
 
-    interpreter := NewInterpreter(*capacity)
-    interpreter.Interpret(stmt)
+    if *mode == "compile" {
+        segments := strings.Split(*filename, "/")
+        name := strings.Split(segments[len(segments) - 1], ".")[0]
+
+        asmName := fmt.Sprintf("%s.asm", name)
+        f, err := os.Create(asmName)
+        if err != nil {
+            panic(err)
+        }
+        defer f.Close()
+        Compile(stmt, f)
+
+        // nasm -fmacho64 tetris.asm
+        cmd := exec.Command("nasm", "-fmacho64", asmName)
+        out, err := cmd.Output()
+        if err != nil {
+            // if there was any error, print it here
+            panic(err)
+        } else {
+            cmd = exec.Command("xcode-select", "-p")
+            xcodePath, err := cmd.Output()
+            if err != nil {
+                panic(err)
+            }
+            xcodePathStr := strings.TrimSpace(string(xcodePath))
+            objFile := fmt.Sprintf("%s.o", name)
+    // ld -e _main  -macosx_version_min 10.10 -arch x86_64 -lSystem -L$(xcode-select -p)/SDKs/MacOSX.sdk/usr/lib -o tetris tetris.o
+            cmd = exec.Command("ld", "-v", 
+                                      "-e", 
+                                      "_main", 
+                                      "-macosx_version_min",
+                                      "10.10", 
+                                      "-arch",
+                                      "x86_64",
+                                      "-lSystem",
+                                      fmt.Sprintf("-L%s/SDKs/MacOSX.sdk/usr/lib", xcodePathStr),
+                                      "-o",
+                                      name,
+                                      objFile)
+
+            var out bytes.Buffer
+            var stderr bytes.Buffer
+            cmd.Stdout = &out
+            cmd.Stderr = &stderr
+            err = cmd.Run()
+            if err != nil {
+                fmt.Println(fmt.Sprint(err) + ": " + stderr.String())
+                return
+            }
+            fmt.Println("Result: " + out.String())
+                                      
+            /*
+            fmt.Println(cmd)
+            out, err := cmd.Output()
+            if err != nil {
+                fmt.Println(out)
+                fmt.Println(err.Error())
+                panic(err)
+            }
+            */
+// ld -e _main  -macosx_version_min 10.10 -arch x86_64 -lSystem -L$(xcode-select -p)/SDKs/MacOSX.sdk/usr/lib -o tetris tetris.o*
+        }
+
+        fmt.Println("Output: ", string(out))
+    } else {
+        interpreter := NewInterpreter(*capacity)
+        interpreter.Interpret(stmt)
+    }
     // compile ... 
 }
 
@@ -924,10 +1007,26 @@ func (interpreter *Interpreter) Interpret(stmt Stmt) {
                 if val, ok := interpreter.Stack.Pop(); ok {
                     interpreter.Dp = interpreter.Dp.Rotate(val)
                 }
+            case NumOut:
+                if val, ok := interpreter.Stack.Pop(); ok {
+                    fmt.Print(val)
+                }
             case CharOut:
                 if val, ok := interpreter.Stack.Pop(); ok {
                     fmt.Print(string(val))
                 }
+            case NumIn:
+                b := make([]byte, 1)
+                os.Stdin.Read(b)
+                val, err := strconv.Atoi(string(b[0]))
+                if err != nil {
+                    panic(err)
+                }
+                interpreter.Stack.Push(int32(val))
+            case CharIn:
+                b := make([]byte, 1)
+                os.Stdin.Read(b)
+                interpreter.Stack.Push(int32(b[0]))
             case Roll:
                 if f, s, ok := interpreter.Stack.Pop2(); ok {
                     interpreter.Stack.Roll(s, f)
@@ -941,4 +1040,174 @@ func (interpreter *Interpreter) Interpret(stmt Stmt) {
 
     }
 }
+
+func write(str string, f io.StringWriter) {
+    _, err := f.WriteString(str)
+    if err != nil {
+        panic(err)
+    }
+}
+
+func Compile(stmt Stmt, f io.StringWriter) {
+    // TODO JH figure out some sort of template to make this easier
+    // TODO JH update this so each func calls push/pop instead of managing the buffer/stack on their own
+    write("global _main\n", f)
+    write("\n", f)
+    write("%macro Exit 0\n", f)
+    write("    mov rax, 0x2000004\n", f)
+    write("    mov rdi, 1\n", f)
+    write("    mov rsi, outmsg\n", f)
+    write("    mov rdx, outmsg.len\n", f)
+    write("    syscall\n", f)
+    write("\n", f)
+    write("    mov rax, 0x2000001\n", f)
+    write("    xor rdi, rdi\n", f)
+    write("    syscall\n", f)
+    write("%endmacro\n", f)
+    write("\n", f)
+    write("%macro Push 1\n", f)
+    write("    add r9, 4\n", f)
+    write("    mov qword[r9], %1\n", f)
+    write("%endmacro\n", f)
+    write("\n", f)
+    write("%macro Pop 1\n", f)
+    write("    mov %1, qword[r9]\n", f)
+    write("    sub r9, 4\n", f)
+    write("%endmacro\n", f)
+    write("\n", f)
+    write("%macro Pop2 2\n", f)
+    write("    mov %1, qword[r9]\n", f)
+    write("    sub r9, 4\n", f)
+    write("    mov %2, qword[r9]\n", f)
+    write("    sub r9, 4\n", f)
+    write("%endmacro\n", f)
+    write("\n", f)
+    write("    section .text\n", f)
+    write("\n", f)
+    write("pop:\n", f)
+    write("    mov rbx, qword[r9]\n", f)
+    write("    sub r9, 4\n", f)
+    write("    ret\n", f)
+    write("\n", f)
+    write("pop2:\n", f)
+    write("    mov rax, qword[r9]\n", f)
+    write("    sub r9, 4\n", f)
+    write("    mov rbx, qword[r9]\n", f)
+    write("    sub r9, 4\n", f)
+    write("    ret\n", f)
+    write("\n", f)
+    write("dup:\n", f)
+    write("    mov rbx, [r9]\n", f)
+    write("    Push rbx\n", f)
+    write("    ret\n", f)
+    write("\n", f)
+    write("add:\n", f)
+    write("    Pop2 rax, rbx\n", f)
+    write("    add rax, rbx\n", f)
+    write("    Push rax\n", f)
+    write("    ret\n", f)
+    write("\n", f)
+    write("sub:\n", f)
+    write("    Pop2 rax, rbx\n", f)
+    write("    sub rbx, rax\n", f)
+    write("    Push rbx\n", f)
+    write("    ret\n", f)
+    write("\n", f)
+    write("\n", f)
+    write("mult:\n", f)
+    write("    Pop2 rbx, rax\n", f)
+    write("    mul rbx\n", f)
+    write("    Push rax\n", f)
+    write("    ret\n", f)
+    write("\n", f)
+    write("div:\n", f)
+    write("    Pop2 rbx, rax\n", f)
+    write("    div rbx\n", f)
+    write("    Push rax\n", f)
+    write("    ret\n", f)
+    write("\n", f)
+    write("chout:\n", f)
+    write("    mov rax, 0x2000004\n", f)
+    write("    mov rdi, 1\n", f)
+    write("    mov rsi, r9\n", f)
+    write("    mov rdx, 1\n", f)
+    write("    sub r9, 4\n", f)
+    write("    syscall\n", f)
+    write("    ret\n", f)
+    write("\n", f)
+    write("greater:\n", f)
+    write("    Pop2 rbx, rax\n", f)
+    write("    cmp rbx, rax\n", f)
+    write("    ; should be able to do this with bitwise operations\n", f)
+    write("    jle less\n", f)
+    write("        Push 0\n", f)
+    write("        ret\n", f)
+    write("    less:\n", f)
+    write("        Push 1\n", f)
+    write("        ret\n", f)
+    write("\n", f)
+    write("_main:\n", f)
+    write("    mov r9, buffer\n", f)
+    write("\n", f)
+    
+    CompileStmt(stmt, f)
+    
+    write("\n", f)
+    write("\n", f)
+    write("    section .data\n", f)
+    write("buffer: times 512 dd 0\n", f)
+    write("outmsg: db 0ah\n", f)
+    write(".len: equ $ - outmsg\n", f)
+}
+func CompileStmt(stmt Stmt, f io.StringWriter) {
+    if stmt == nil {
+        return
+    }
+    if block, ok := stmt.(StmtBlock); ok {
+        if block.Children != nil {
+            for _, s := range block.Children {
+                CompileStmt(s, f)
+            }
+        }
+    } else if call, ok := stmt.(Call); ok {
+        switch call.Op {
+            case Push:
+                f.WriteString(fmt.Sprintf("    Push %d\n\n", call.Args[0]))
+            case Pop:
+                f.WriteString(fmt.Sprintf("    sub r9, 4\n"))
+            case Add:
+                f.WriteString(fmt.Sprintf("    call add\n"))
+            case Sub:
+                f.WriteString(fmt.Sprintf("    call sub\n"))
+            case Mult:
+                f.WriteString(fmt.Sprintf("    call mult\n"))
+            case Div:
+                f.WriteString(fmt.Sprintf("    call div\n"))
+            case Dup:
+                f.WriteString(fmt.Sprintf("    call dup\n"))
+            case Greater:
+                f.WriteString(fmt.Sprintf("    call greater\n"))
+            case Switch:
+                f.WriteString(fmt.Sprintf("    sub r9, 4 ; switch\n"))
+            case Pointer:
+                f.WriteString(fmt.Sprintf("    sub r9, 4 ; pointer\n"))
+            case NumOut:
+                panic("num out not supported yet")
+            case CharOut:
+                f.WriteString(fmt.Sprintf("    call chout\n"))
+            case NumIn:
+                panic("num in not supported yet")
+            case CharIn:
+                panic("char in not supported yet")
+            case Roll:
+                panic("roll not supported yet")
+            case Exit:
+                f.WriteString(fmt.Sprintf("    Exit\n"))
+            default:
+                panic(fmt.Sprintf("%s not supported", call.Op))
+        }
+
+    }
+}
+
 

@@ -1,3 +1,3 @@
 module github.com/jasonhightower/go-piet
 
-go 1.20
+go 1.21
