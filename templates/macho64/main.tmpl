@@ -1,0 +1,187 @@
+{{ define "stmt" -}}
+{{ if IsBlock . -}}
+  {{ range .Children }}
+    {{ template "stmt" . -}}
+  {{ end }}
+{{- else if IsOp . "dup" -}}
+    Dup
+{{- else if IsOp . "add" -}}
+    Add
+{{- else if IsOp . "sub" -}}
+    Sub
+{{- else if IsOp . "mult" -}}
+    Mult
+{{- else if IsOp . "div" -}}
+    Div
+{{- else if IsOp . "pop" -}}
+    Pop
+{{- else if IsOp . "char_out" -}}
+    Chout
+{{- else if IsOp . "push" -}}
+    Push {{ index .Args 0 }}
+{{- else if IsOp . "switch" -}}
+    sub r9, 4
+{{- else if IsOp . "pointer" -}}
+    sub r9, 4
+{{- else if IsOp . "roll" -}}
+    call roll
+{{- else if IsOp . "exit" -}}
+    Exit
+{{- else if IsCall . -}}
+  call {{ .Op }}{{ if HasArgs . }} {{ index .Args 0 }}{{ end }}
+{{- end }}
+{{- end }}
+
+global _main
+
+%macro Exit 0
+    mov rax, 0x2000004
+    mov rdi, 1
+    mov rsi, outmsg
+    mov rdx, outmsg.len
+    syscall
+
+    mov rax, 0x2000001
+    xor rdi, rdi
+    syscall
+%endmacro
+
+%macro Push 1
+    add r9, 4
+    mov qword[r9], %1
+%endmacro
+
+%macro Pop 1
+    mov %1, qword[r9]
+    sub r9, 4
+%endmacro
+
+%macro Pop2 2
+    mov %1, qword[r9]
+    sub r9, 4
+    mov %2, qword[r9]
+    sub r9, 4
+%endmacro
+
+
+%macro Dup 0
+    mov rbx, qword[r9]
+    Push rbx
+%endmacro
+
+%macro Add 0
+    Pop2 rax, rbx
+    add rax, rbx
+    Push rax
+%endmacro
+
+%macro Sub 0
+    Pop2 rax, rbx
+    sub rbx, rax
+    Push rbx
+%endmacro
+
+%macro Mult 0
+    Pop2 rbx, rax
+    mul rbx
+    Push rax
+%endmacro
+
+%macro Div 0
+    Pop2 rbx, rax
+    div rbx
+    Push rax
+%endmacro
+
+%macro Chout 0
+    mov rax, 0x2000004
+    mov rdi, 1
+    mov rsi, r9
+    mov rdx, 1
+    sub r9, 4
+    syscall
+%endmacro
+
+    section .text
+
+; rax - address of starting position for the swap
+; rbx - number of items being reversed 
+; rdx - number of iterations required
+; rcx - used as counter
+; r10 - used for swap
+; r11 - used for swap
+reverse:
+    mov rcx, 0
+    push rax
+    push rbx
+    lea rax, [r8 + rax * 4]
+    lea rbx, [r8 + rbx * 4]
+    rloop:
+      cmp rcx, rdx
+      je end_rloop
+      mov qword[r10], rax
+      mov qword[r11], rbx
+      mov qword[rax], r11
+      mov qword[rbx], r10
+      sub rbx, 4
+      add rax, 4
+      inc rcx
+      jmp rloop
+    end_rloop:
+      pop rbx
+      pop rax
+      ret
+
+; rsi - used to store depth of the roll
+; rdi - used to store times to roll
+; rdx - used to store number of iterations required when reversing
+; 
+roll:
+    Pop2 rsi, rdi
+
+    mov r8, r9
+    mov r10, rsi
+    shl r10, 2
+    sub r8, r10     ; r8 points at the starting position of the roll
+
+    mov rax, 0
+    mov rbx, rsi
+    mov rdx, rsi
+    shr rdx, 1
+    call reverse ; reverse all items
+
+    mov rbx, rdi 
+    mov rdx, rdi
+    shr rdx, 1
+    call reverse ; reverse first segment
+
+    mov rax, rbx
+    add rax, 1
+    mov rbx, rsi
+    mov rdx, rbx
+    sub rdx, rax
+    shr rdx, 1
+    call reverse
+
+    ret
+
+greater:
+    Pop2 rbx, rax
+    cmp rbx, rax
+    ; should be able to do this with bitwise operations
+    jle less
+        Push 0
+        ret
+    less:
+        Push 1
+        ret
+
+_main:
+    mov r9, buffer
+
+    {{ template "stmt" . }}
+
+    section .data
+buffer: times 512 dd 0
+outmsg: db 0ah
+.len: equ $ - outmsg
