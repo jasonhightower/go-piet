@@ -665,15 +665,15 @@ func ParseStmt(tokens *PietTokens, capacity int) Stmt {
         attempts = 8
         switch op {
         case Switch: 
-            root.Append(Call{Op:Pointer})
             if val, ok := stack.Pop(); ok {
+               root.Append(Call{Op:Pointer})
                if val % 2 > 0 {
                    cc = cc.Toggle()
                }
             }
         case Pointer:
-            root.Append(Call{Op:Switch})
             if val, ok := stack.Pop(); ok {
+                root.Append(Call{Op:Switch})
                 dp = dp.Rotate(val)
             }
         case Push: 
@@ -681,24 +681,24 @@ func ParseStmt(tokens *PietTokens, capacity int) Stmt {
             root.Append(Call{Op: op, Args: []int32 {curShape.Size}})
         case Add: 
             if f, s, ok := stack.Pop2(); ok {
+               root.Append(Call{Op: op})
                stack.Push(s + f)
             }
-            root.Append(Call{Op: op})
         case Sub: 
             if f, s, ok := stack.Pop2(); ok {
+                root.Append(Call{Op: op})
                 stack.Push(s - f)
             }
-            root.Append(Call{Op: op})
         case Mult:
             if f, s, ok := stack.Pop2(); ok {
+                root.Append(Call{Op: op})
                 stack.Push(s * f)
             }
-            root.Append(Call{Op: op})
         case Div:
             if f, s, ok := stack.Pop2(); ok {
+                root.Append(Call{Op: op})
                 stack.Push(s / f)
             }
-            root.Append(Call{Op: op})
         case NumOut:
             stack.Pop()
             root.Append(Call{Op: op})
@@ -711,31 +711,32 @@ func ParseStmt(tokens *PietTokens, capacity int) Stmt {
             panic("NumIn not supported")
         case Roll:
             if f, s, ok := stack.Pop2(); ok {
+                root.Append(Call{Op: op})
                 stack.Roll(s, f)
             }
-            root.Append(Call{Op: op})
         case Pop:
-            stack.Pop()
-            root.Append(Call{Op: op})
+            if _, ok := stack.Pop(); ok {
+                root.Append(Call{Op: op})
+            }
         case Dup:
             if val, ok := stack.Peek(); ok {
+                root.Append(Call{Op: op})
                 stack.Push(val)
             }
-            root.Append(Call{Op: op})
         case Greater:
             if f, s, ok := stack.Pop2(); ok {
+                root.Append(Call{Op: op})
                 if s > f {
                     stack.Push(1)
                 } else {
                     stack.Push(0)
                 }
             }
-            root.Append(Call{Op: op})
         case Mod:
             if f, s, ok := stack.Pop2(); ok {
+                root.Append(Call{Op: op})
                 stack.Push(s % f)
             }
-            root.Append(Call{Op: op})
         case Noop:
         default:
             panic(fmt.Sprintf("Unhandled operator %s", op))
@@ -879,7 +880,7 @@ func main() {
 
         // nasm -fmacho64 tetris.asm
         cmd := exec.Command("nasm", "-fmacho64", tmplName)
-        out, err := cmd.Output()
+        _, err = cmd.Output()
         if err != nil {
             // if there was any error, print it here
             panic(err)
@@ -914,12 +915,8 @@ func main() {
                 fmt.Println(fmt.Sprint(err) + ": " + stderr.String())
                 return
             }
-            fmt.Println("Result: " + out.String())
-                                      
-// ld -e _main  -macosx_version_min 10.10 -arch x86_64 -lSystem -L$(xcode-select -p)/SDKs/MacOSX.sdk/usr/lib -o tetris tetris.o*
+            // ld -e _main  -macosx_version_min 10.10 -arch x86_64 -lSystem -L$(xcode-select -p)/SDKs/MacOSX.sdk/usr/lib -o tetris tetris.o*
         }
-
-        fmt.Println("Output: ", string(out))
     } else {
         interpreter := NewInterpreter(*capacity)
         interpreter.Interpret(stmt)
