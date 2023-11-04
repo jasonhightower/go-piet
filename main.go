@@ -8,7 +8,7 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
-//    "embed"
+    "embed"
 	"io"
 	"os"
 	"os/exec"
@@ -21,13 +21,21 @@ import (
 
 // templates/macho64/main.tmpl
 
+const (
+    layoutsDir = "templates/layouts"
+    templatesDir = "templates"
+)
+
 var (
-    //mainTmpl embed.FS
+    //go:embed templates/macho64/main.tmpl
+    asmTemplateFS embed.FS
+
+//    mainTmpl embed.FS
     asmTemplate *template.Template
 )
 
 func init() {
-    tmpl, err := template.New("main.tmpl").Funcs(template.FuncMap{
+    asmTemplate = template.Must(template.New("main.tmpl").Funcs(template.FuncMap{
           "IsBlock": func(stmt Stmt) bool {
               _, ok := stmt.(StmtBlock) 
               return ok
@@ -48,11 +56,7 @@ func init() {
               }
               return false
           },
-      }).ParseFiles("templates/macho64/main.tmpl")//, "templates/macho64/stmt.tmpl")
-      if err != nil {
-          panic(err)
-      }
-      asmTemplate = tmpl
+      }).ParseFS(asmTemplateFS, "templates/macho64/main.tmpl"))//, "templates/macho64/stmt.tmpl"))
   //    baseLayout := template.Must(template.New("layout").ParseFS(mainTmpl, templateLayout))
 }
 
