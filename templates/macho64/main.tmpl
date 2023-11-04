@@ -28,7 +28,7 @@
 {{- else if IsOp . "char_in" -}}
     Chin
 {{- else if IsOp . "num_in" -}}
-
+    Numin
 {{- else if IsOp . "exit" -}}
     Exit
 {{- else if IsCall . -}}
@@ -114,7 +114,13 @@ global _main
    mov rsi, r9
    mov rdx, 1
    syscall
-   ret
+%endmacro
+
+%macro Numin 0
+   Chin
+   mov dl, [r9]
+   sub dl, 48
+   mov [r9], dl
 %endmacro
 
     section .text
