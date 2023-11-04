@@ -25,6 +25,10 @@
     sub r9, 4          ; pointer
 {{- else if IsOp . "roll" -}}
     call roll
+{{- else if IsOp . "char_in" -}}
+    Chin
+{{- else if IsOp . "num_in" -}}
+
 {{- else if IsOp . "exit" -}}
     Exit
 {{- else if IsCall . -}}
@@ -100,6 +104,17 @@ global _main
     mov rdx, 1
     sub r9, 4
     syscall
+%endmacro
+
+%macro Chin 0
+   mov rax, 0x2000003
+   xor rdi, rdi
+   add r9, 4
+   mov [r9], dword(0) ; zero out 4 bytes in memory
+   mov rsi, r9
+   mov rdx, 1
+   syscall
+   ret
 %endmacro
 
     section .text

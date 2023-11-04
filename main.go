@@ -16,6 +16,7 @@ import (
 	"strings"
     "bytes"
     "text/template"
+    "bufio"
 )
 
 // templates/macho64/main.tmpl
@@ -446,19 +447,19 @@ type Instr struct {
     Op Op
     Data uint32
 }
-type Stack struct {
-    data []int32
+type Stack [C any] struct {
+    data []C
     head int
     capacity int
 }
-func NewStack(capacity int) *Stack {
-    return &Stack{
+func NewIntStack(capacity int) *Stack [int32] {
+    return &Stack [int32]{
         data: make([]int32, capacity),
         head: -1,
         capacity: capacity,
     }
 }
-func (s Stack) String() string {
+func (s Stack[C]) String() string {
     result := fmt.Sprint("[")
     for i := 0; i <= s.head; i++ {
         if i > 0 {
@@ -470,10 +471,10 @@ func (s Stack) String() string {
     result += "]"
     return result
 }
-func (s *Stack) Len() int {
+func (s *Stack[C]) Len() int {
     return s.head + 1
 }
-func (s *Stack) Roll(depth int32, rolls int32) {
+func (s *Stack[C]) Roll(depth int32, rolls int32) {
     if s.Len() <= 1 || int(depth) > s.Len() {
         return
     }
@@ -486,7 +487,7 @@ func (s *Stack) Roll(depth int32, rolls int32) {
     s.Reverse(mid, s.Len())
 }
 
-func (s *Stack) Reverse(from int, to int) {
+func (s *Stack[C]) Reverse(from int, to int) {
     to -= 1
     count := (to - from )/ 2
     for i := 0; i < count; i++ {
@@ -494,43 +495,46 @@ func (s *Stack) Reverse(from int, to int) {
     }
 }
 
-func (s *Stack) Swap(source int, target int) {
+func (s *Stack[C]) Swap(source int, target int) {
     tmp := s.data[target]
     s.data[target] = s.data[source]
     s.data[source] = tmp
 }
 
-func (s *Stack) Push(val int32) {
+func (s *Stack[C]) Push(val C) {
     s.head += 1
     if s.head >= s.capacity {
         panic("Stack overflow")
     }
     s.data[s.head] = val
 }
-func (s *Stack) Pop() (int32, bool) {
+func (s *Stack[C]) Pop() (C, bool) {
     if s.head < 0 {
-        return 0, false
+        var result C
+        return result, false
     }
     val := s.data[s.head]
     s.head -= 1
     return val, true
 }
-func (s *Stack) Pop2() (int32, int32, bool) {
+func (s *Stack[C]) Pop2() (C, C, bool) {
     if s.head < 1 {
-        return 0, 0, false
+        var result C
+        return result, result, false
     }
     val := s.data[s.head]
     val2 := s.data[s.head - 1]
     s.head -= 2
     return val, val2, true
 }
-func (s *Stack) Peek() (int32, bool) {
+func (s *Stack[C]) Peek() (C, bool) {
     if s.head < 0 {
-        return 0, false
+        var result C
+        return result, false
     }
     return s.data[s.head], true
 }
-func (s *Stack) Dup() bool {
+func (s *Stack[C]) Dup() bool {
     if s.head + 1 >= s.capacity {
         panic("Stack overflow")
     }
@@ -625,7 +629,7 @@ func ParseStmt(tokens *PietTokens, capacity int) Stmt {
     carrot := Carrot{X:0, Y:0, tokens: tokens}
 
     root := StmtBlock{}
-    stack := NewStack(capacity)
+    stack := NewIntStack(capacity)
 
     curShape := carrot.CurrentShape()
 
@@ -706,9 +710,11 @@ func ParseStmt(tokens *PietTokens, capacity int) Stmt {
             stack.Pop()
             root.Append(Call{Op: op})
         case NumIn:
-            panic("NumIn not supported")
+            stack.Push(-1) // TODO JH this should be an object that indicates unknown input
+            root.Append(Call{Op: op})
         case CharIn:
-            panic("NumIn not supported")
+            stack.Push(-1) // TODO JH this should be an object that indicates unknown input
+            root.Append(Call{Op: op})
         case Roll:
             if f, s, ok := stack.Pop2(); ok {
                 root.Append(Call{Op: op})
@@ -966,13 +972,16 @@ type Call struct {
 type Interpreter struct {
     Dp Dp
     Cc Cc
-    Stack *Stack
+    Stack *Stack[int32]
+    Input *bufio.Reader
 }
 func NewInterpreter(capacity int) *Interpreter {
     return &Interpreter{
-        Stack: NewStack(capacity),
+        Stack: NewIntStack(capacity),
+        Input: bufio.NewReader(os.Stdin),
     }
 }
+
 func (interpreter *Interpreter) Interpret(stmt Stmt) {
     if stmt == nil {
         return
@@ -1043,7 +1052,10 @@ func (interpreter *Interpreter) Interpret(stmt Stmt) {
                 }
             case NumIn:
                 b := make([]byte, 1)
-                os.Stdin.Read(b)
+                _, err := interpreter.Input.Read(b)
+                if err != nil {
+                    panic(err)
+                }
                 val, err := strconv.Atoi(string(b[0]))
                 if err != nil {
                     panic(err)
@@ -1051,7 +1063,10 @@ func (interpreter *Interpreter) Interpret(stmt Stmt) {
                 interpreter.Stack.Push(int32(val))
             case CharIn:
                 b := make([]byte, 1)
-                os.Stdin.Read(b)
+                _, err := interpreter.Input.Read(b)
+                if err != nil {
+                    panic(err)
+                }
                 interpreter.Stack.Push(int32(b[0]))
             case Roll:
                 if f, s, ok := interpreter.Stack.Pop2(); ok {
